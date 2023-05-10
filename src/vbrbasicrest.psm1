@@ -60,9 +60,11 @@ function Invoke-VBRRestMethod {
     return $answer
 }
 function Get-VBRRestGUI {
-    $rest = @{"status"="failed"}
+    [CmdletBinding()] 
+    param()
 
-    [xml]$xaml = @"
+    $rest = @{"status"="failed"}
+ [xml]$xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Width="500"
@@ -71,7 +73,8 @@ function Get-VBRRestGUI {
      <Grid Margin="0,0,0,0">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="3*"/>
-            <ColumnDefinition Width="5*"/>
+            <ColumnDefinition Width="3*"/>
+            <ColumnDefinition Width="2*"/>
         </Grid.ColumnDefinitions>
         <Grid.RowDefinitions>
             <RowDefinition Height="2*"/>
@@ -80,18 +83,21 @@ function Get-VBRRestGUI {
             <RowDefinition Height="3*"/>
         </Grid.RowDefinitions>
 
-        <Border  Grid.Row="0" Grid.RowSpan="4" Grid.Column ="0" Grid.ColumnSpan="2"  Background="#005f4b"/>
+        <Border  Grid.Row="0" Grid.RowSpan="4" Grid.Column ="0" Grid.ColumnSpan="3"  Background="#005f4b"/>
 
         <TextBlock Margin="5,5,0,0" VerticalAlignment="Bottom" Grid.Column="0" Grid.Row="0" Foreground="White" FontSize="16" Text="Server" />
         <TextBlock Margin="5,5,0,0" VerticalAlignment="Bottom" Grid.Column="0" Grid.Row="1" Foreground="White" FontSize="16" Text="Login"/>
         <TextBlock Margin="5,5,0,0" VerticalAlignment="Bottom" Grid.Column="0" Grid.Row="2" Foreground="White" FontSize="16" Text="Password"/>
         <CheckBox Margin="5,5,0,5"  VerticalAlignment="Bottom" Grid.Column="0" Grid.Row="3" x:Name="iunsecure" Foreground="White" FontSize="16" Content="Ignore Self Signed"/>
 
-        <TextBox x:Name="iserver"   Grid.Column="1" Grid.Row="0" Margin="0,5,5,0" Text="https://localhost:9419"  HorizontalAlignment="Stretch" VerticalContentAlignment="Center"/>
-        <TextBox x:Name="ilogin"    Grid.Column="1" Grid.Row="1" Margin="0,5,5,0" Text="administrator"  HorizontalAlignment="Stretch" VerticalContentAlignment="Center"/>
-        <PasswordBox x:Name="ipassword" Grid.Column="1" Grid.Row="2" Margin="0,5,5,0"  HorizontalAlignment="Stretch" VerticalContentAlignment="Center"/>
+
+
+        <TextBox x:Name="iserver"    Grid.Column="1" Grid.Row="0" Text="https://localhost" Margin="0,5,5,0" HorizontalAlignment="Stretch" VerticalContentAlignment="Center"/>
+        <TextBox x:Name="iport"  Grid.Column="2" Grid.Row="0"   Text="9419" Margin="0,5,5,0" HorizontalAlignment="Stretch" VerticalContentAlignment="Center"/>
+        <TextBox x:Name="ilogin"    Grid.Column="1" Grid.Row="1" Grid.ColumnSpan="2"  Margin="0,5,5,0" Text="administrator"  HorizontalAlignment="Stretch" VerticalContentAlignment="Center"/>
+        <PasswordBox x:Name="ipassword" Grid.Column="1" Grid.Row="2" Grid.ColumnSpan="2" Margin="0,5,5,0"  HorizontalAlignment="Stretch" VerticalContentAlignment="Center"/>
                         
-        <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="1" Orientation="Horizontal"
+        <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal"
             HorizontalAlignment="Right" VerticalAlignment="Bottom">
               <Button x:Name="blogin" Content="Login"
                       ClickMode="Press"
@@ -101,6 +107,7 @@ function Get-VBRRestGUI {
     </Grid>
 </Window>
 "@ 
+ 
     [void][System.Reflection.Assembly]::LoadWithPartialName('presentationframework')
     try{
        $Form=[Windows.Markup.XamlReader]::Load( (New-Object System.Xml.XmlNodeReader $XAML) )
@@ -108,10 +115,17 @@ function Get-VBRRestGUI {
        $loginclick = {
             $rest.status = "trylogin"
 
-            $uri = $Form.FindName("iserver").text
+            $server = $Form.FindName("iserver").text
+            $port = $Form.FindName("iport").text
+            $uri = ("{0}:{1}" -f $server,$port)
+
+            
+
             $login = $Form.FindName("ilogin").text
             $password = $Form.FindName("ipassword").Password
             $insecure = $Form.FindName("iunsecure").IsChecked
+
+            write-verbose "Connecting to $uri with $login (self sign:$insecure)"
 
             if ($insecure) {
                 Set-InsecureSSL
@@ -162,12 +176,18 @@ function Get-VBRRestHelp {
             $mname = $match.name
             $mobj = $help.paths."$mname"
 
-            write-host ("$mname`n###############################")
+            write-host ("API Path: $mname`n`n")
 
             foreach($method in ($mobj | gm -Type NoteProperty | % {$_.name})) {
                 $ep = $mobj."$method"
                 write-host ("{0}: {1}" -f $method,$ep.description)
-                write-host ("https://helpcenter.veeam.com/docs/backup/vbr_rest/reference/vbr-rest-v1-1-rev0.html?ver=120#tag/{0}/operation/{1} `n" -f ($ep.tags[0] -replace "[ ]","-"),$ep.operationId)
+                if($ep.requestBody.required) {
+                    write-host " Requires Data:"
+                    write-host ('  Invoke-VBRRestMethod -r $rest -path "{0}" -method {1} -body $data' -f $mname,$method)
+                } else {
+                    write-host ('  Invoke-VBRRestMethod -r $rest -path "{0}" -method {1}' -f $mname,$method)
+                }
+                write-host ("https://helpcenter.veeam.com/docs/backup/vbr_rest/reference/vbr-rest-v1-1-rev0.html?ver=120#tag/{0}/operation/{1} `n`n" -f ($ep.tags[0] -replace "[ ]","-"),$ep.operationId)
             }
 
         }
