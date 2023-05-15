@@ -2,8 +2,8 @@ import-module .\vbrbasicrest.psm1
 
 $user = "vbr\administrator"
 $port = 9419
-$src = Get-VBRRestGUI -server https://192.168.0.92 -port $port -login $user  -insecure -Verbose
-$tgt = Get-VBRRestGUI -server https://192.168.0.191 -port $port -login $user -insecure -Verbose
+$src = Get-VBRRestGUI -server https://srcip -port $port -login $user  -insecure -Verbose
+$tgt = Get-VBRRestGUI -server https://tgtip -port $port -login $user -insecure -Verbose
 
 #Get-VBRRestHelp -r $src -search export
 #Get-VBRRestHelp -r $src -search import
