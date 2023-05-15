@@ -47,7 +47,7 @@ function Get-VBRRestConnection {
     if ($exp.gettype() -ne [System.DateTime]) {
         $exp = [System.DateTime]::Parse($exp)
     }
-
+    
     $autorenew = $exp.AddSeconds(-($answer.expires_in)/2)
     if($insecure) {
         Set-InsecureSSL
@@ -88,34 +88,54 @@ function Invoke-VBRRestMethod {
         [Parameter(Mandatory=$true)][Alias("r")]$restconnection,
         $path,$method="get",$body=$null)
 
-    $answer = $null
-    $headers = $restconnection.headers
-    $uri = ("{0}/{1}" -f $restconnection.uri,$path)
+    $exp = $restconnection.exp
+    if(($exp - (get-date)).totalseconds -gt 1) 
+    {
+        $answer = $null
+        $headers = $restconnection.headers
+        $uri = ("{0}/{1}" -f $restconnection.uri,$path)
 
-    if (($restconnection.autorenew - (get-date)).TotalSeconds -lt 0) {
-        Write-Verbose "Autorenewing"
-        Update-VBRRestConnection -restconnection $restconnection
+        if (($restconnection.autorenew - (get-date)).TotalSeconds -lt 0) {
+            Write-Verbose "Autorenewing"
+            Update-VBRRestConnection -restconnection $restconnection
+        }
+
+        $iparams = @{"Method"=$method;"Headers"=$headers;"Uri"=$uri;ContentType="application/json"}
+        if ($body) {
+            $iparams.Body = ($body | ConvertTo-Json -Compress -Depth 100)
+        } 
+        
+        if ($PSVersionTable.PSVersion.Major -ge 7 -and $restconnection.insecure) {
+            $iparams.SkipCertificateCheck = $restconnection.insecure
+        }
+
+        Write-Verbose ($iparams | ConvertTo-Json -Depth 3)
+        $answer = Invoke-RestMethod @iparams
+        return $answer
+    } else {
+        throw "Expired session $exp, too late for autorenew"
     }
-
-    $iparams = @{"Method"=$method;"Headers"=$headers;"Uri"=$uri;ContentType="application/json"}
-    if ($body) {
-        $iparams.Body = ($body | ConvertTo-Json -Compress -Depth 100)
-    } 
-    
-    if ($PSVersionTable.PSVersion.Major -ge 7 -and $restconnection.insecure) {
-        $iparams.SkipCertificateCheck = $restconnection.insecure
-    }
-
-    Write-Verbose ($iparams | ConvertTo-Json -Depth 3)
-    $answer = Invoke-RestMethod @iparams
-    return $answer
 }
+
+
+function New-VBRRestConfigFile {
+    $vbrrestconfigfile = join-path -path  $env:USERPROFILE -childpath ".vbrrestconfig"
+
+    $config = @{
+        "servers"=@("https://127.0.0.1")
+        "login"="domain\administrator"
+   }
+
+    $config | ConvertTo-Json | set-content $vbrrestconfigfile
+    try {start-process -FilePath notepad -ArgumentList $vbrrestconfigfile -ErrorAction Ignore} catch {write-host "File located under $vbrrestconfigfile"}
+}
+
 function Get-VBRRestGUI {
     [CmdletBinding()] 
     param(
-        $server="https://127.0.0.1",
+        $server="",
         $port="9419",
-        $login="administrator",
+        $login="",
         [switch]$insecure=$false
     )
 
@@ -152,20 +172,23 @@ function Get-VBRRestGUI {
         <TextBlock x:Name="ostatus" Margin="5,5,0,0" Grid.ColumnSpan="2"  VerticalAlignment="Bottom" Grid.Column="0" Grid.Row="5" Foreground="White" FontSize="16" Text="" />
 
 
-        <TextBox x:Name="iserver" FontSize="16"    Grid.Column="1" Grid.Row="1" Text="https://localhost" Margin="0,5,5,0" HorizontalAlignment="Stretch" VerticalContentAlignment="Center"/>
-        <TextBox x:Name="iport"  FontSize="16"  Grid.Column="2" Grid.Row="1"   Text="9419" Margin="0,5,5,0" HorizontalAlignment="Stretch" VerticalContentAlignment="Center"/>
-        <TextBox x:Name="ilogin"  FontSize="16"    Grid.Column="1" Grid.Row="2" Grid.ColumnSpan="2"  Margin="0,5,5,0" Text="administrator"  HorizontalAlignment="Stretch" VerticalContentAlignment="Center"/>
-        <PasswordBox x:Name="ipassword" FontSize="16"  Grid.Column="1" Grid.Row="3" Grid.ColumnSpan="2" Margin="0,5,5,0"  HorizontalAlignment="Stretch" VerticalContentAlignment="Center"/>
+        <ComboBox x:Name="iserver" FontSize="14"    Grid.Column="1" Grid.Row="1" IsEditable="True" Margin="0,5,5,0" HorizontalAlignment="Stretch" VerticalContentAlignment="Center">
+        </ComboBox>
+
+
+        <TextBox x:Name="iport"  FontSize="14"  Grid.Column="2" Grid.Row="1"   Text="9419" Margin="0,5,5,0" HorizontalAlignment="Stretch" VerticalContentAlignment="Center"/>
+        <TextBox x:Name="ilogin"  FontSize="14"    Grid.Column="1" Grid.Row="2" Grid.ColumnSpan="2"  Margin="0,5,5,0" Text="administrator"  HorizontalAlignment="Stretch" VerticalContentAlignment="Center"/>
+        <PasswordBox x:Name="ipassword" FontSize="14"  Grid.Column="1" Grid.Row="3" Grid.ColumnSpan="2" Margin="0,5,5,0"  HorizontalAlignment="Stretch" VerticalContentAlignment="Center"/>
                         
         <StackPanel Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal"
             HorizontalAlignment="Right" VerticalAlignment="Bottom">
               <Button x:Name="bcancel" Content="Cancel"
                     ClickMode="Press"
-                    FontSize="18"
+                    FontSize="16"
                     Margin="0,0,5,5" Width="150" Foreground="#005f4b" Background="White"  />
               <Button x:Name="blogin" Content="Login"
                       ClickMode="Press"
-                      FontSize="18"
+                      FontSize="16"
                       Margin="0,0,5,5" Width="150" Foreground="#005f4b" Background="White"  />
         </StackPanel>
     </Grid>
@@ -184,7 +207,35 @@ function Get-VBRRestGUI {
        $ilogin = $Form.FindName("ilogin")
        $iunsecure = $Form.FindName("iunsecure")
 
-       $iserver.text = $server
+       $vbrrestconfigfile = join-path -path  $env:USERPROFILE -childpath ".vbrrestconfig"
+
+       $config = @{
+            "servers"=@("https://127.0.0.1")
+            "login"="administrator"
+       }
+
+       if (test-path $vbrrestconfigfile) {
+            $config = Get-Content -Path $vbrrestconfigfile | convertfrom-json
+       }
+
+       foreach ($s in @($config.servers)) {
+            $ci = [System.Windows.Controls.ComboBoxItem]::new()
+            $ci.content = $s
+            $iserver.items.add($ci) | out-null
+            $iserver.text = $s
+       }
+
+       if ($server -ne "") {
+            $ci = [System.Windows.Controls.ComboBoxItem]::new()
+            $ci.content = $server
+            $iserver.items.insert(0,$ci) | out-null
+            $iserver.text = $server    
+       }
+
+       if ($login -eq "") {
+            $login = $config.login
+       }
+
        $iport.text = $port
        $ilogin.text = $login
        $iunsecure.IsChecked = $insecure
@@ -284,6 +335,8 @@ function Get-VBRRestHelpPath {
 
 }
 
+
+
 function Get-VBRRestHelp {
     [CmdletBinding()] 
     param(
@@ -339,6 +392,7 @@ function Get-VBRRestAutomationSessionLog {
     return $(Invoke-VBRRestMethod -r $restconnection -path ("/api/v1/automation/sessions/{0}/logs" -f $session.id) -method get)
 }
 
+Export-ModuleMember -Function New-VBRRestConfigFile
 Export-ModuleMember -Function Get-VBRRestGUI
 Export-ModuleMember -Function Get-VBRRestHelp
 Export-ModuleMember -Function Set-InsecureSSL
